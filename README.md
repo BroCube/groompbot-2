@@ -1,6 +1,6 @@
 # yt-to-reddit bot
 
-This code was originally inspired by /u/groompbot and the work to improve the code done by https://github.com/BroCube/groompbot-t
+This code was originally inspired by /u/groompbot and the work to improve the code done by https://github.com/BroCube/groompbot-2
 
 But I've massively rewritten it, it probably little resembles what came before, so while it's a fork, it's basically very different.
 
