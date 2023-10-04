@@ -1,161 +1,122 @@
-//YouTube-to-Reddit bot v2.2 - HTML scraper edition
-//by Dan Barbier - reddit.com/u/brocube
-//for use with reddit.com/u/groompbot
+//YouTube-to-Reddit bot v3? - Simple Library Edition
+//Re-written by Bob Hannent - reddit.com/u/bobdvb
+//Inspired by Dan Barbier - reddit.com/u/brocube
+//originally for use with reddit.com/u/groompbot
 
 //node
 //get video post history
-//video_history.txt is a comma-delimited list of youtube video GUID's
+//video_history.txt is a stored JSON array of youtube video IDs
+var videoHistory = new Array();
+var history_file = './video_history.json';
 var fs = require("fs");
 
-var videoHistory;
+function fetchHistory () {
+        if(!fs.existsSync(history_file)) {
+         console.log("File not found: " + history_file);
+        }
+        var receivedChunks = "";
+        try {
+                receivedChunks = fs.readFileSync(history_file);
+        } catch (err) {
+                console.log("File read failed");
+        }
 
-var receivedChunks = "";
-var videoHistoryReadStream = fs.createReadStream("./video_history.txt", {encoding: "utf8"});
-videoHistoryReadStream
-	.on("error", function (err) {
-		console.log("videoHistoryReadStream failed: " + err);
-	})
-	.on("readable", function () {
-		var chunk;
-		while (null !== (chunk = videoHistoryReadStream.read())) {
-			receivedChunks += chunk;
-		}
-	})
-	.on("end", function () {
-		videoHistory = receivedChunks.split(",");
-		if (!Array.isArray(videoHistory)) {
-			return this.emit("error", new Error("videoHistory isn't an array"));
-		}
-		if (videoHistory.length < 1) {
-			return this.emit("error", new Error("videoHistory is empty"));
-		}
-		console.log("videoHistory loaded with " + videoHistory.length + " items");
-		startHTMLPull();
-});
+        console.log("Chunk size is: " + receivedChunks.length);
+        if (receivedChunks.length <= 0) {
+                console.log("No received chunks");
+        } else {
+                videoHistory = JSON.parse(receivedChunks); //receivedChunks.split(",");
+                console.log("Found: " + videoHistory);
+        }
+        if (!Array.isArray(videoHistory)) {
+                return new Error("videoHistory isn't an array");
+        }
+        if (videoHistory.length < 1) {
+                return new Error("videoHistory is empty");
+        }
+        console.log(history_file + " loaded with " + videoHistory.length + " items");
+};
 
-//rawjs - reddit API wrapper
-//npm install raw.js
-//https://www.reddit.com/r/rawjs/wiki/documentation/methods/submit
-//https://www.reddit.com/dev/api#POST_api_submit
-//shoutout to https://www.reddit.com/r/rawjs/comments/23qmme/simple_bot_to_make_an_automated_submission_to_a/
-//to use - create an app with type "script" - https://ssl.reddit.com/prefs/apps/
-var rawjs = require("raw.js");
-
-var credentials = { //removed from public code. Make sure to put your own info here if you clone this!
-	"username": "",
-	"password": ""
+// Reddit credentials
+var credentials = { //removed from public code. Make sure to put your own info here
+        "username": "",
+        "password": ""
 };
 
 var oAuth2 = { //removed from public code. Make sure to put your own info here if you clone this!
-	"id": "",
-	"secret": "",
-	"redir": ""
+        "id": "",
+        "secret": "",
+        "redir": ""
 };
 
-var reddit = new rawjs("youtube-to-reddit bot");
-reddit.setupOAuth2(oAuth2.id, oAuth2.secret, oAuth2.redir);
+// Reddit Code
+const snoowrap = require('snoowrap');
+
+const otherRequester = new snoowrap({
+        userAgent: 'dtlbot/1.0 by bobdvb',
+        clientId: oAuth2.id,
+        clientSecret: oAuth2.secret,
+        username: credentials.username,
+        password: credentials.password
+});
 
 function postToReddit (url, title) {
-	var submission = {
-		"url": url,
-		"r": "gamegrumps",
-		"title": title
-	};
-	reddit.auth(credentials, function (err, res) {
-		if (err) {
-			console.log("reddit.auth failed: " + err);
-		} else {
-			console.log("reddit.auth succeeded: " + res);
-			reddit.captchaNeeded(function (err, required) {
-				if (err) {
-					console.log("reddit.captchaNeeded failed: " + err);
-				} else {
-					if (required) {
-						console.log("can not submit because captcha is needed");
-					} else {
-						reddit.submit(submission, function (err, id) {
-							console.log("posting to reddit:\n  link: " + url + "\n  title: " + title);
-							if (err) {
-								console.log("reddit.submit failed: " + err);
-							} else {
-								console.log("reddit.submit succeeded!");
-							}
-						});
-					}
-				}
-			});
-		}
-	});
-}
+        console.log("posting");
+        // Submitting a link to a subreddit without the /r/, just the name
+        otherRequester.getSubreddit('DextersTechLab').submitLink({
+                title: title,
+                url: url
+        });
+};
 
-//htmlparser2 - html parser
-//npm install htmlparser2
-//https://github.com/fb55/htmlparser2
-
-//(in conjuntion with) request - simple http request client
-//npm install request
-//https://www.npmjs.com/package/request
-var htmlparser = require("htmlparser2");
-var request = require("request");
+// Fetch YouTube channels, save to list and post to Reddit
+const youtube = require('scrape-youtube');
+const nodeCron = require('node-cron');
 
 function startHTMLPull () {
-	setInterval(function () {
-		var htmlItems = [];
+        // Searching for the current keyword and within a month, sorted by newest.
+        // Might consider reducing the filter to the last week or day for busy channels
+        youtube.search('DextersTechLab', {sp: 'EgIIBA%253D%253D'}).then((results) => {
+                // Unless you specify a custom type you will only receive 'video' results
+//              console.log("Youtube results: " + results.videos); //debug
+                for (var i in results.videos) {
+                // Narrow down by channel name because that's what we're tracking.
+                if (results.videos[i].channel.name === 'DextersTechLab') {
+                        // Is the video NOT already in the previously spotted videos
+                        if (videoHistory.indexOf(results.videos[i].id) === -1){
+                                //Add the new video to the history
+                                videoHistory.push(results.videos[i].id);
+                                //Update the history file
+                                fs.writeFile(history_file, JSON.stringify(videoHistory, null, 2), function (err) {
+                                        if (err) {
+                                                console.log("writeFile for video_history.txt failed: " + err);
+                                        }
+                                });
+                                //Make the post to Reddit
+                                postToReddit(results.videos[i].link, results.videos[i].title);
+                        } else {
+                                // Don't bother logging if there are loads of videos
+                                if (results.videos.length <= 20) {
+                                //The found video already exists, logged for debugging
+                                console.log("Exists: " + results.videos[i].title); //TODO: Comment out for busy channels?
+                                }
+                        }
+                } else {
+                // Not target channel
+                }
+                };
+        });
 
-		var parser = new htmlparser.Parser({
-			onerror: function (err) {
-				console.log("htmlParser had error: " + err);
-			},
-			onopentag: function (name, attributes) {
-				if (name === "a" && attributes.class === "yt-uix-sessionlink yt-uix-tile-link  spf-link  yt-ui-ellipsis yt-ui-ellipsis-2") {
-					var videoObject = {
-						"guid": "yt:video:" + attributes.href.slice(9), //for compatibility, spoof the GUID to match youtube's xml by adding "yt:video:"
-						"link": "https://www.youtube.com" + attributes.href,
-						"title": attributes.title
-					};
-					htmlItems.push(videoObject);
-				}
-			},
-			onend: function () {
-				if (htmlItems.length < 1 || htmlItems[0].guid.length < 10) {
-					return this.emit("error", new Error("No HTML found!"));
-				} else {
-					for (var i in htmlItems) {
-						if (videoHistory.indexOf(htmlItems[i].guid) === -1) {
-							//update history
-							videoHistory.push(htmlItems[i].guid);
-							//save video history
-							fs.writeFile("./video_history.txt", videoHistory, function (err) {
-								if (err) {
-									console.log("writeFile for video_history.txt failed: " + err);
-								}
-							});
-							//finally, post to reddit!
-							console.log("posting to reddit:", htmlItems[i].link, "-", htmlItems[i].title);
-							postToReddit(htmlItems[i].link, htmlItems[i].title);
-						}
-					}
-				}
-			}
-		}, {decodeEntities: true});
+};
 
-		var youtubeRequest = request("https://www.youtube.com/user/GameGrumps/videos?sort=dd&view=0&flow=list", function (err, res, body) {
-			if (err) {
-				console.log("request callback failed: " + err);
-			}
-			parser.write(body);
-			parser.end();
-		});
+// Start by fetching the history
+fetchHistory();
+// Then fetch the latest since last time
+startHTMLPull();
+// Check every 5min past the hour
+nodeCron.schedule('5,35 * * * *', () => {
+        console.log("Cron triggered...");
+        startHTMLPull();
+});
 
-		youtubeRequest.on("error", function (err) {
-			console.log("request failed: " + err);
-		});
-		youtubeRequest.on("response", function (res) {
-			if (res.statusCode != 200) {
-				return youtubeRequest.emit("error", new Error("Bad status code: " + res.statusCode));
-			}
-		});
-	}, 30000);
-}
-
-console.log("\n...booting the Game Grumps Youtube-To-Reddit Scraper Bot");
+//console.log("\nFinished the Youtube-To-Reddit Scraper Bot\n");
